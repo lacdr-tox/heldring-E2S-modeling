@@ -1,0 +1,354 @@
+---
+title: "E2S_KDdataAnalysis"
+author: "Muriel Heldring"
+date: '2022-08-31'
+output: html_document
+---
+
+First load packages:
+```{r}
+library(tidyverse)
+library(naniar)
+library(splines)
+library(dplyr)
+```
+
+```{r, setup, include=FALSE}
+rm(list = ls())
+
+knitr::opts_knit$set(root.dir = "/data/muriel/Projects/E2S/Analysis/00_Imaging/Exp013_GFP_Britt/")
+```
+
+Load data sets: (5 KD EXPs)
+```{r}
+dir("Data_KD")
+KD_006MT <- read_delim("Data_KD/006-MT/20200224_Exp006-MT_t24_SummaryData.txt", delim = "\t")
+KD_252 <- read_delim("Data_KD/252/20200612_Exp252_Nikon4_live_Summarydata.txt", delim = "\t")
+KD_262 <- read_delim("Data_KD/262/20200612_Exp262_Nikon2_siRNAKD_Summarydata.txt", delim = "\t")
+KD_267 <- read_delim("Data_KD/267/20200627_Exp267_24hrsliveKD_Summarydata.txt", delim = "\t")
+KD_273 <- read_delim("Data_KD/273/20200704_Exp273_Nikon4_24hrsliveKD_SummaryData.txt", delim = "\t")
+```
+
+Convert tables to wide format:
+```{r}
+KD_006MT_wider <- pivot_wider(data = KD_006MT, 
+                    id_cols = c("treatment","plateID","dose_uM","timeID","locationID", "cell_line"),
+                    names_from = "variable",
+                    values_from = "value")
+KD_252_wider <- pivot_wider(data = KD_252, 
+                    id_cols = c("treatment","plateID","dose_uM","timeID","locationID", "cell_line"),
+                    names_from = "variable",
+                    values_from = "value")
+KD_262_wider <- pivot_wider(data = KD_262, 
+                    id_cols = c("treatment","plateID","dose_uM","timeID","locationID", "cell_line"),
+                    names_from = "variable",
+                    values_from = "value")
+KD_267_wider <- pivot_wider(data = KD_267, 
+                    id_cols = c("treatment","plateID","dose_uM","timeID","locationID", "cell_line"),
+                    names_from = "variable",
+                    values_from = "value")
+KD_273_wider <- pivot_wider(data = KD_273, 
+                    id_cols = c("treatment","plateID","dose_uM","timeID","locationID", "cell_line"),
+                    names_from = "variable",
+                    values_from = "value")
+```
+
+Needed KD_data:
+	Knock down data of proteins and its effect on expression in other proteins
+	Five experiments, and use for
+	- GREB1-GFP: Exp. 006-MT, Exp. 252 , Exp. 262 en Exp. 273
+	- PGR-GFP: Exp. 006-MT, Exp. 262 en Exp. 267
+	- TFF1-GFP: Exp. 006-MT, Exp. 262 en Exp. 273
+	
+Remove unused data
+```{r}
+KD_252_wider_GREB1 <- KD_252_wider %>% filter(cell_line %in% c("GREB1-GFP_mock","GREB1-GFP_siESR1", "GREB1-GFP_siGREB1", "GREB1-GFP_siKP", "GREB1-GFP_siPGR", "GREB1-GFP_siTFF1", "GREB1-GFP_untreated", "GREB1-GFP_medium"))
+
+##same variable names
+KD_252_wider_GREB1 <- KD_252_wider_GREB1 %>% rename(Cytoplasm_Intensity_IntegratedIntensity_Image_GFP = Cytoplasm_N_Intensity_IntegratedIntensity_Image_GFP)
+
+KD_267_wider_PGR <- KD_267_wider %>% filter(cell_line %in% c("PGR-GFP_mock", "PGR-GFP_siESR1", "PGR-GFP_siGREB1", "PGR-GFP_siPGR", "PGR-GFP_siTFF1", "PGR-GFP_siKP", "PGR-GFP_untreated", "PGR-GFP_medium"))
+
+KD_273_wider_GREB1_TFF1 <- KD_273_wider %>% filter(cell_line %in% c("GREB1-GFP_mock", "GREB1-GFP_siESR1", "GREB1-GFP_siGREB1", "GREB1-GFP_siPGR", "GREB1-GFP_siTFF1", "GREB1-GFP_siKP", "GREB1-GFP_untreated","GREB1-GFP_medium", "TFF1-GFP_mock", "TFF1-GFP_siESR1", "TFF1-GFP_siGREB1", "TFF1-GFP_siPGR", "TFF1-GFP_siTFF1", "TFF1-GFP_siKP", "TFF1-GFP_untreated", "TFF1-GFP_medium"))
+
+##rename columns
+KD_006MT_wider <- KD_006MT_wider %>% rename(Cytoplasm_Intensity_IntegratedIntensity_Image_GFP = Cytoplasm_N_Intensity_IntegratedIntensity_Image_GFP)
+
+KD_262_wider <- KD_262_wider %>% rename(Cytoplasm_Intensity_IntegratedIntensity_Image_GFP = Cytoplasm_N_Intensity_IntegratedIntensity_Image_GFP)
+
+```
+
+Knock down data:
+```{r}
+#bind data sets
+KD_TOTAL <- bind_rows(KD_006MT_wider,
+                      KD_252_wider_GREB1,
+                      KD_262_wider,
+                      KD_267_wider_PGR,
+                      KD_273_wider_GREB1_TFF1)
+
+rm(list = c("KD_006MT",
+            "KD_006MT_wider",
+            "KD_252",
+            "KD_252_wider",
+            "KD_252_wider_GREB1",
+            "KD_262",
+            "KD_262_wider",
+            "KD_267",
+            "KD_267_wider",
+            "KD_267_wider_PGR",
+            "KD_273",
+            "KD_273_wider",
+            "KD_273_wider_GREB1_TFF1"))
+
+#rename DMSO to 17B-estradiol (DMSO = 0, E2 = 1)
+KD_TOTAL <- KD_TOTAL %>% mutate(dose_uM = as.factor(dose_uM), 
+                                 treatment = ifelse(treatment == "DMSO", "17B-estradiol",treatment))
+
+#remove medium control
+KD_TOTAL <- KD_TOTAL %>% filter(treatment !="Medium",
+                                !cell_line %in% c("GREB1-GFP_untreated",
+                                                  "TFF1-GFP_untreated",
+                                                  "PGR-GFP_untreated",
+                                                  "GREB1-GFP_medium",
+                                                  "TFF1-GFP_medium",
+                                                  "PGR-GFP_medium"))
+
+# Rename the GFP intensity column names
+KD_TOTAL <- KD_TOTAL %>% rename("NucleicIntensity" = "Nuclei_Intensity_IntegratedIntensity_Image_GFP",
+                                "CytoplasmicIntensity" = "Cytoplasm_Intensity_IntegratedIntensity_Image_GFP")
+
+```
+
+```{r}
+# Normalised cell count by dividing cell count with the cell count at timeID 0 
+KD_TOTAL_TIME1 <- KD_TOTAL %>% filter(timeID == 1) %>% 
+  select(-c("timeID", "NucleicIntensity",
+            "CytoplasmicIntensity"))
+
+KD_TOTAL <- left_join(KD_TOTAL, KD_TOTAL_TIME1, 
+                      by = c("treatment", "plateID", "dose_uM", "locationID", "cell_line"), 
+                      suffix = c("","_t1")) %>% 
+                mutate(Relative_Cell_Growth = imageCountParentObj/imageCountParentObj_t1) %>%
+                select(-c("imageCountParentObj_t1"))
+rm("KD_TOTAL_TIME1")
+
+# # Normalize intensities to DMSO
+# KD_TOTAL_DMSO <- KD_TOTAL %>% filter(dose_uM == 0) %>%
+#   select(-c(dose_uM, locationID, treatment)) %>% ungroup() %>%
+#   group_by(cell_line, timeID, plateID) %>%
+#   summarise(NucleicIntensity_DMSO = mean(NucleicIntensity),
+#             CytoplasmicIntensity_DMSO = mean(CytoplasmicIntensity))
+# 
+# KD_TOTAL <- left_join(KD_TOTAL, KD_TOTAL_DMSO, by = c("cell_line", "timeID", "plateID"),
+#                       suffix = c("", "_DMSO")) %>% 
+#   mutate(RelativeNucleicIntensity = NucleicIntensity / NucleicIntensity_DMSO,
+#          RelativeCytoplasmicIntensity = CytoplasmicIntensity / CytoplasmicIntensity_DMSO) %>% 
+#   select(-c("NucleicIntensity_DMSO", "CytoplasmicIntensity_DMSO", "treatment"))
+# rm("KD_TOTAL_DMSO")
+
+```
+
+Split the cell lines into 3:
+```{r}
+# Split cell line column 
+KD_TOTAL <- KD_TOTAL %>%
+  mutate(condition = sapply(cell_line, function(cl) {str_split(cl, "_")[[1]][2]}),
+         cell_line = sapply(cell_line, function(cl) {str_split(cl, "-")[[1]][1]}),
+         condition = ifelse(condition == "siKP", "siControl", condition))
+
+```
+
+Min-max normalisation
+```{r}
+#define function
+min_max_norm <- function(x) {
+    (x - min(x)) / (max(x) - min(x))
+}
+
+
+#create min max data set
+KD_TOTAL_minmax <- KD_TOTAL %>% group_by(cell_line, plateID) %>% 
+  mutate(NucleicIntensityMinMax = min_max_norm(NucleicIntensity),
+         CytoplasmicIntensityMinMax = min_max_norm(CytoplasmicIntensity))
+head(KD_TOTAL_minmax)
+
+```
+
+
+Technical Replicate Mean of KD data
+```{r}
+
+#calculate TechRepMean unnormalised and normalised:
+TechRepMean_KD_minmax <- KD_TOTAL_minmax %>% ungroup() %>% 
+  group_by(cell_line, timeID, plateID, condition, dose_uM) %>%
+  summarize(#mean cyto intensity and sd
+            MeanCytoplasmicIntensityMinMax = mean(CytoplasmicIntensityMinMax),
+            sdCytoplasmicIntensityMinMax = sd(CytoplasmicIntensityMinMax, na.rm = T),
+            #mean nucl intensity and sd
+            MeanNucleicIntensityMinMax = mean(NucleicIntensityMinMax),
+            sdNucleicIntensityMinMax = sd(NucleicIntensityMinMax, na.rm = T))
+```
+
+Biological Replicate Mean of KD data:
+```{r}
+#calculate BioRepMean unnormalised and normalised:
+BioRepMean_KD_minmax <- TechRepMean_KD_minmax %>% ungroup() %>% 
+  group_by(cell_line, timeID, condition, dose_uM) %>%
+  # mean cyto intensity and sd
+  summarise(BioMeanCytoplasmicIntensityMinMax = mean(MeanCytoplasmicIntensityMinMax),
+            BioSDCytoplasmicIntensityMinMax = sd(MeanCytoplasmicIntensityMinMax, na.rm = T),
+            # mean nucl intensity and sd
+            BioMeanNucleicIntensityMinMax = mean(MeanNucleicIntensityMinMax),
+            BioSDNucleicIntensityMinMax = sd(MeanNucleicIntensityMinMax, na.rm = T))
+```
+
+Biological relative mean intensity
+```{r}
+#Bio mean cytoplasmic intensity of GREB1
+ggplot(BioRepMean_KD_minmax %>% 
+         filter(dose_uM == 1, cell_line == "GREB1",
+                !condition %in% c("siControl", "siESR1"))) +
+  geom_errorbar(aes(x = timeID,
+                    ymin = BioMeanCytoplasmicIntensityMinMax - BioSDCytoplasmicIntensityMinMax,
+                    ymax = BioMeanCytoplasmicIntensityMinMax + BioSDCytoplasmicIntensityMinMax,
+                    colour = condition), width = 0.5) +
+  geom_line(aes(x= timeID, y = BioMeanCytoplasmicIntensityMinMax, color = condition), size = 1) + 
+  labs(x = "Time (h)", y = "GFP intensity (a.u.)") + 
+  scale_colour_viridis_d(name = "Condition") + 
+  theme_classic() +
+  #ylim(0,1.11) + 
+  scale_y_continuous(breaks = c(0,0.2,0.4,0.6,0.8,1)) +
+  theme(plot.title = element_text(hjust = 0.5, size = 22),
+        axis.text = element_text(size = 16),
+        axis.title = element_text(size = 20),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 18)) +
+  ggtitle("GREB1-GFP")
+ggsave(filename = "/data/muriel/Projects/E2S/Analysis/00_Imaging/Exp013_GFP_Britt/Figures/v2/Fig2C_KD_GREB1.pdf", width = 4.5, height = 3)
+
+#Bio mean cytoplasmic intensity of TFF1
+ggplot(BioRepMean_KD_minmax %>% 
+         filter(dose_uM == 1, cell_line == "TFF1",
+                !condition %in% c("siControl", "siESR1"))) +
+  geom_errorbar(aes(x = timeID,
+                    ymin = BioMeanCytoplasmicIntensityMinMax - BioSDCytoplasmicIntensityMinMax,
+                    ymax = BioMeanCytoplasmicIntensityMinMax + BioSDCytoplasmicIntensityMinMax,
+                    colour = condition), width = 0.5) +
+  geom_line(aes(x= timeID, y = BioMeanCytoplasmicIntensityMinMax, color = condition), size = 1) + 
+  labs(x = "Time (h)", y = "GFP intensity (a.u.)") + 
+  scale_colour_viridis_d(name = "Condition") + 
+  theme_classic() +
+  ylim(0,1) +
+  theme(plot.title = element_text(hjust = 0.5, size = 22),
+        axis.text = element_text(size = 16),
+        axis.title = element_text(size = 20),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 18)) +
+  ggtitle("TFF1-GFP")
+ggsave("/data/muriel/Projects/E2S/Analysis/00_Imaging/Exp013_GFP_Britt/Figures/v2/Fig2C_KD_TFF1.pdf", width = 4.5, height = 3)
+
+#Bio mean nucleic intensity of PR
+ggplot(BioRepMean_KD_minmax %>% 
+         filter(dose_uM == 1, cell_line == "PGR",
+                !condition %in% c("siControl", "siESR1"))) +
+  geom_errorbar(aes(x = timeID,
+                    ymin = BioMeanNucleicIntensityMinMax - BioSDNucleicIntensityMinMax,
+                    ymax = BioMeanNucleicIntensityMinMax + BioSDNucleicIntensityMinMax,
+                    colour = condition), width = 0.5) +
+  geom_line(aes(x= timeID, y = BioMeanNucleicIntensityMinMax, color = condition), size = 1) + 
+  labs(x = "Time (h)", y = "GFP intensity (a.u.)") + 
+  scale_colour_viridis_d(name = "Condition") + 
+  theme_classic() +
+  ylim(0,1) +
+  theme(plot.title = element_text(hjust = 0.5, size = 22),
+        axis.text = element_text(size = 16),
+        axis.title = element_text(size = 20),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 18)) +
+  ggtitle("PR-GFP")
+ggsave("/data/muriel/Projects/E2S/Analysis/00_Imaging/Exp013_GFP_Britt/Figures/v2/Fig2C_KD_PR.pdf", width = 4.5, height = 3)
+```
+
+
+
+Is the GFP expression between different conditions significant different from each other?
+http://www.sthda.com/english/wiki/one-way-anova-test-in-r#compute-one-way-anova-test
+```{r}
+# Hypothesis: The mean GFP intensity of one condition within each cell line is not significantly different from the other condition within the same cell line
+
+
+KD_data <- TechRepMean_KD_minmax %>% ungroup() %>% filter(timeID == 24, dose_uM == 1) %>% 
+  select(cell_line, condition, plateID, MeanCytoplasmicIntensityMinMax, MeanNucleicIntensityMinMax) %>%
+  mutate(Intensity = ifelse(cell_line %in% c("GREB1","TFF1"),
+                            MeanCytoplasmicIntensityMinMax,
+                            MeanNucleicIntensityMinMax))
+
+# Make the variables categorical
+KD_data <- KD_data %>% mutate(condition = as.factor(condition))
+
+```
+
+Do one way ANOVA per cell line:
+```{r}
+#PGR:
+KD_data_PGR <- KD_data %>% filter(cell_line == "PGR")
+
+group_by(KD_data_PGR, condition) %>%
+  summarise(
+    count = n(),
+    mean = mean(Intensity, na.rm = TRUE),
+    sd = sd(Intensity, na.rm = TRUE)
+  )
+
+# Compute the analysis of variance
+res.aov_PGR <- aov(Intensity ~ condition, data = KD_data_PGR)
+# Summary of the analysis
+summary(res.aov_PGR)
+
+#GREB1:
+KD_data_GREB1 <- KD_data %>% filter(cell_line == "GREB1")
+group_by(KD_data_GREB1, condition) %>%
+  summarise(
+    count = n(),
+    mean = mean(Intensity, na.rm = TRUE),
+    sd = sd(Intensity, na.rm = TRUE)
+  )
+
+# Compute the analysis of variance
+res.aov_GREB1 <- aov(Intensity ~ condition, data = KD_data_GREB1)
+# Summary of the analysis
+summary(res.aov_GREB1)
+
+#TFF1:
+KD_data_TFF1 <- KD_data %>% filter(cell_line == "TFF1")
+group_by(KD_data_TFF1, condition) %>%
+  summarise(
+    count = n(),
+    mean = mean(Intensity, na.rm = TRUE),
+    sd = sd(Intensity, na.rm = TRUE)
+  )
+
+# Compute the analysis of variance
+res.aov_TFF1 <- aov(Intensity ~ condition, data = KD_data_TFF1)
+# Summary of the analysis
+summary(res.aov_TFF1)
+```
+
+Now we know that the conditions within the KD_data data set are significant different from each other in terms
+of Real_GFP_intensity.
+The next step is to check if there is sig dif between specific conditions.
+
+Tukey multiple pairwise-comparisons:
+As the ANOVA test is significant, we can compute Tukey HSD (Tukey Honest Significant Differences, R function:
+TukeyHSD()) for performing multiple pairwise-comparison between the means of groups.
+```{r}
+TukeyHSD(res.aov_PGR)
+#save("Significant difference between PGR condition.png")
+TukeyHSD(res.aov_GREB1)
+#save("Significant difference between GREB1 condition.png")
+TukeyHSD(res.aov_TFF1)
+#save("Significant difference between TFF1 condition.png")
+
+```
+

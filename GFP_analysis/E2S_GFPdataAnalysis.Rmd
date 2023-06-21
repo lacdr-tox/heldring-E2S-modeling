@@ -1,0 +1,266 @@
+---
+title: "E2S_GFPdataAnalysis"
+author: "Muriel Heldring"
+date: '2022-08-30'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+```
+
+First load packages:
+```{r}
+library(tidyverse)
+library(naniar)
+library(splines)
+```
+
+```{r, setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/data/muriel/Projects/E2S/Analysis/00_Imaging/Exp013_GFP_Britt/")
+```
+
+Load data sets: (3 GFP EXPs and 5 KD EXPs)
+```{r}
+dir("Data_GFP/")
+GFP_266 <- read_delim("Data_GFP/266/20200624_Exp266_72hrslive_Summarydata.txt", delim = "\t")
+GFP_268 <- read_delim("Data_GFP/268/20200630_Exp268_Nikon2_72hrslive_Summarydata.txt", delim = "\t")
+GFP_272 <- read_delim("Data_GFP/272/20200707_Exp272_72hrslive_SummaryData.txt", delim = "\t")
+```
+
+Convert tables to wide format:
+```{r}
+GFP_266_wider <- pivot_wider(data = GFP_266, 
+                    id_cols = c("treatment","plateID","dose_uM","timeID","locationID", "cell_line"),
+                    names_from = "variable",
+                    values_from = "value")
+GFP_268_wider <- pivot_wider(data = GFP_268, 
+                    id_cols = c("treatment","plateID","dose_uM","timeID","locationID", "cell_line"),
+                    names_from = "variable",
+                    values_from = "value")
+GFP_272_wider <- pivot_wider(data = GFP_272, 
+                    id_cols = c("treatment","plateID","dose_uM","timeID","locationID", "cell_line"),
+                    names_from = "variable",
+                    values_from = "value") 
+```
+
+Remove all the data that we are not using, according to the following instructions:
+
+GFP_data:
+	GFP expression, GREB1, TFF1 and PGR
+	Three experiments, 72 hr live (with weird stuff happening after ~ 50 hrs): 
+	266, 268, 272
+	
+
+Work with the following data sets (1 for GFP expression and 1 for KD data):
+
+GFP expression: 
+```{r}
+#bind data sets
+GFPTOTAL <- bind_rows(GFP_266_wider, GFP_268_wider, GFP_272_wider)
+rm(list = ls()[grep("_",ls())])
+
+
+#rename DMSO to 17B-estradiol
+GFPTOTAL <- GFPTOTAL %>% mutate(dose_uM = as.factor(dose_uM), 
+                                treatment = ifelse(treatment == "DMSO_T1", "17B-estradiol_T1",
+                                                   ifelse(treatment == "DMSO_T2", "17B-estradiol_T2",treatment)))
+
+#remove medium control
+GFPTOTAL <- GFPTOTAL %>% filter(treatment != "medium") 
+
+# Rename intensity columns
+GFPTOTAL <- GFPTOTAL %>% rename("NucleicIntensity" = "Nuclei_Intensity_IntegratedIntensity_Image_GFP",
+                                "CytoplasmicIntensity" = "Cytoplasm_Intensity_IntegratedIntensity_Image_GFP")
+
+#work with 17B-estradiol_T1 cells which are not exposed to TAM (-TAM)
+GFPTOTAL <- GFPTOTAL %>% filter(treatment == "17B-estradiol_T1")
+
+#normalised cell count by dividing cell count with the cell count at timeID 0 
+GFPTOTAL_TIME1 <- GFPTOTAL %>% filter(timeID == 1) %>% 
+  select(-c("timeID", "NucleicIntensity", "CytoplasmicIntensity"))
+
+GFPTOTAL <- left_join(GFPTOTAL, GFPTOTAL_TIME1, 
+                      by = c("treatment", "plateID", "dose_uM", "locationID", "cell_line"), 
+                      suffix = c("","_t1")) %>% 
+  mutate(Relative_Cell_Growth = imageCountParentObj/imageCountParentObj_t1) %>%
+  select(-c("imageCountParentObj_t1"))
+rm(GFPTOTAL_TIME1)
+
+#normalised intensities to DMSO
+GFPTOTAL_DMSO <- GFPTOTAL %>% filter(dose_uM == 0) %>%
+  select(-c(dose_uM, locationID, treatment)) %>% 
+  group_by(cell_line, timeID, plateID) %>%
+  summarise(NucleicIntensity_DMSO = mean(NucleicIntensity),
+            CytoplasmicIntensity_DMSO = mean(CytoplasmicIntensity))  
+
+GFPTOTAL <- left_join(GFPTOTAL, GFPTOTAL_DMSO, by = c("cell_line", "timeID", "plateID"), 
+                      suffix = c("", "_DMSO")) %>%
+  mutate(RelativeNucleicIntensity = NucleicIntensity / NucleicIntensity_DMSO,
+         RelativeCytoplasmicIntensity = CytoplasmicIntensity / CytoplasmicIntensity_DMSO) %>% 
+  select(-c("NucleicIntensity_DMSO", "CytoplasmicIntensity_DMSO")) 
+
+
+#drop data points 56 - 62
+GFPTOTAL <- GFPTOTAL %>%
+  mutate(Cytoplasm_Intensity_drop_points = ifelse(plateID == "20200626_Exp268_Nikon2_72hrslive"&
+                                                    timeID %in% c(55,56,57,58,59,60,61,62,71,72),NA,
+                                                  ifelse(plateID == "20200703_Exp272_Nikon2_72hrslive"&
+                                                           timeID %in% c(56,57,58,59,60,61,62),NA,
+                                                         CytoplasmicIntensity)),
+         relative_cyt_intensity_drop_points = ifelse(plateID == "20200626_Exp268_Nikon2_72hrslive"&
+                                                       timeID %in% c(55,56,57,58,59,60,61,62,71,72),NA,
+                                                     ifelse(plateID == "20200703_Exp272_Nikon2_72hrslive"&
+                                                              timeID %in% c(56,57,58,59,60,61,62),NA,
+                                                            RelativeCytoplasmicIntensity))) %>% 
+  ungroup()
+
+#rename plateIDs,i.e. biological replicates into 1,2,3 respectively
+GFPTOTAL <- GFPTOTAL %>% mutate(plateID = ifelse(plateID == "20200619_Exp266_Nikon2_72hrslive","1", 
+                                                 ifelse(plateID == "20200626_Exp268_Nikon2_72hrslive","2", 
+                                                        ifelse(plateID == "20200703_Exp272_Nikon2_72hrslive","3", plateID)))) 
+
+```
+
+Technical Replicate Mean:
+```{r}
+#calculate TechRepMean unnormalised and normalised:
+TechRepMean <- GFPTOTAL %>% group_by(cell_line, timeID, plateID, treatment, dose_uM) %>% 
+          #mean count and sd
+  summarize(MeanCount = mean(imageCountParentObj), 
+            sdMeanCount = sd(imageCountParentObj, na.rm = T),
+          #mean cyto intensity and sd
+            MeanCytoplasmicIntensity = mean(CytoplasmicIntensity),
+            sdMeanCytoplasmicIntensity = sd(CytoplasmicIntensity, na.rm = T),
+          #mean nucl intensity and sd
+            MeanNucleicIntensity = mean(NucleicIntensity),
+            sdMeanNucleicIntensity = sd(NucleicIntensity, na.rm = T),
+          #norm mean count and sd
+            RelativeMeanCellGrowth = mean(Relative_Cell_Growth), 
+            sdRelativeMeanCellGrowth = sd(Relative_Cell_Growth, na.rm = T),
+          #norm mean cyto intensity and sd
+            Relative_MeanCytoInt = mean(RelativeCytoplasmicIntensity),
+            sdRelative_MeanCytoInt = sd(RelativeCytoplasmicIntensity, na.rm = T),
+          #norm mean nucleic intensity and sd
+            Relative_MeanNucInt = mean(RelativeNucleicIntensity),
+            sdRelative_MeanNucInt = sd(RelativeNucleicIntensity, na.rm = T),
+          #predicted mean cyto intensity and sd
+            MeanCytoplasmicIntensity_NA = mean(Cytoplasm_Intensity_drop_points),
+            sdMeanCytoplasmicIntensity_NA = sd(Cytoplasm_Intensity_drop_points, na.rm = T),
+          #predicted relative mean cyto intensity and sd
+            Relative_MeanCytoInt_NA = mean(relative_cyt_intensity_drop_points),
+            sdRelative_MeanCytoInt_NA = sd(relative_cyt_intensity_drop_points, na.rm = T))
+
+```
+
+Biological Replicate Mean:
+```{r}
+#calculate BioRepMean unnormalised and normalised:
+BioRepMean <- TechRepMean %>% group_by(cell_line, timeID, treatment, dose_uM) %>%
+          #mean count and sd
+  summarise(BioMeanCount = mean(MeanCount), 
+            sdBioMeanCount = sd(MeanCount, na.rm = T),
+          #mean cyto intensity and sd
+            BioMeanCytoplasmicIntensity = mean(MeanCytoplasmicIntensity),
+            sdBioMeanCytoplasmicIntensity = sd(MeanCytoplasmicIntensity, na.rm = T),
+          #mean nucl intensity and sd
+            BioMeanNucleicIntensity = mean(MeanNucleicIntensity),
+            sdBioMeanNucleicIntensity = sd(MeanNucleicIntensity, na.rm = T),
+          #norm mean count and sd
+            RelativeBioMeanCellGrowth = mean(RelativeMeanCellGrowth), 
+            sdRelativeBioMeanCellGrowth = sd(RelativeMeanCellGrowth, na.rm = T),
+          #norm mean cyto intensity and sd
+            Relative_BioMeanCytoInt = mean(Relative_MeanCytoInt),
+            sdRelative_BioMeanCytoInt = sd(Relative_MeanCytoInt, na.rm = T),
+          #norm mean nucleic intensity and sd
+            Relative_BioMeanNucInt = mean(Relative_MeanNucInt),
+            sdRelative_BioMeanNucInt = sd(Relative_MeanNucInt, na.rm = T), 
+          #predicted mean cyto intensity and sd
+            BioMeanCytoplasmicIntensity_NA = mean(MeanCytoplasmicIntensity_NA),
+            sdBioMeanCytoplasmicIntensity_NA = sd(MeanCytoplasmicIntensity_NA, na.rm = T),
+          #predicted relative mean cyto intensity and sd
+            Relative_BioMeanCytoInt_NA = mean(Relative_MeanCytoInt_NA),
+            sdRelative_BioMeanCytoInt_NA = sd(Relative_MeanCytoInt_NA, na.rm = T))
+
+# Make one column with the required readout
+BioRepMean <- BioRepMean %>%
+  mutate(meanGFPintensity = ifelse(cell_line == "PR", BioMeanNucleicIntensity, BioMeanCytoplasmicIntensity),
+         sdGFPintensity = ifelse(cell_line == "PR", sdBioMeanNucleicIntensity, sdBioMeanCytoplasmicIntensity))
+
+# Make a plot
+facetlabels_cols <- c("0" = "0 nM",
+                 "0.001" = "0.001 nM",
+                 "0.01" = "0.01 nM",
+                 "0.1" = "0.1 nM",
+                 "1" = "1 nM",
+                 "10" = "10 nM",
+                 "100" = "100 nM")
+facetlabels_rows <- c("MCF7-GREB1-GFP" = "GREB1",
+                      "MCF7-PGR-GFP" = "PR",
+                      "MCF7-TFF1-GFP" = "TFF1")
+
+# Make a plot of the cell growth
+ggplot(BioRepMean %>% filter(dose_uM %in% c(0,0.001,0.01,0.1,1,10,100),
+                             timeID < 56), aes(x = timeID, y = RelativeBioMeanCellGrowth)) +
+  geom_ribbon(aes(ymin = RelativeBioMeanCellGrowth-sdRelativeBioMeanCellGrowth, ymax = RelativeBioMeanCellGrowth+sdRelativeBioMeanCellGrowth, fill = dose_uM), alpha = 0.2) +
+  geom_line(aes(color = dose_uM)) +
+  scale_color_viridis_d(name = "Dose (nM)") +
+  scale_fill_viridis_d() +
+  xlab("Time (h)") + ylab("Normalized cell count") +
+  theme_classic() +
+  guides(color=guide_legend("Dose (nM)"), fill = "none") +
+  theme(axis.text = element_text(size=12),
+        axis.title = element_text(size=16),
+        strip.text = element_text(size = 12)) +
+  facet_grid(cell_line ~ ., scales = "free_y", 
+             labeller = labeller(.rows = facetlabels_rows))
+ggsave("Figures/v2/FigS4B_cell_growth.pdf", width = 4, height = 6)
+
+# Make a plot of the unnormalized GFP data
+ggplot(BioRepMean %>% filter(dose_uM %in% c(0,0.01,0.1,1,10,100),
+                             timeID < 56), aes(x = timeID, y = meanGFPintensity)) +
+  #geom_point(size = 1) +
+  #geom_errorbar(aes(ymin = meanGFPintensity-sdGFPintensity, ymax = meanGFPintensity+sdGFPintensity)) +
+  geom_ribbon(aes(ymin = meanGFPintensity-sdGFPintensity, ymax = meanGFPintensity+sdGFPintensity, fill = dose_uM), alpha = 0.5) +
+  geom_line(aes(color = dose_uM)) +
+  scale_color_viridis_d() +
+  scale_fill_viridis_d() +
+  xlab("Time (h)") + ylab("GFP intensity (a.u.)") +
+  theme_classic() +
+  theme(legend.position = 'none',
+        axis.text = element_text(size=12),
+        axis.title = element_text(size=16),
+        strip.text = element_text(size = 12)) +
+  facet_grid(cell_line ~ dose_uM, scales = "free_y", 
+             labeller = labeller(.cols = facetlabels_cols, .rows = facetlabels_rows))
+ggsave("Figures/v2/FigS3D_GFPdata_unnormalised.pdf", width = 7, height = 4)
+```
+
+*create the data set for experimental data as an input to the model in Jupyter notebook: "M21T_20220304_AK_E2Model.txt"*
+```{r}
+#start with TechRepmean dataset bc we do not need the locationID so we are using the mean of each locationID:
+Exp_data <- TechRepMean %>% ungroup() %>% select(cell_line, plateID ,dose_uM, timeID, Relative_MeanCytoInt, Relative_MeanNucInt)
+
+#keep the nucleic intensity for PGR:
+Exp_data_nucleic <- Exp_data %>% select(-c(Relative_MeanCytoInt)) %>% 
+  filter(cell_line == "MCF7-PGR-GFP") %>% rename(Real_GFP_intensity = Relative_MeanNucInt)
+
+#keep cytoplasmic intensity for GREB1:
+Exp_data_cytoplasmic_greb1 <- Exp_data %>% select(-c(Relative_MeanNucInt)) %>% 
+  filter(cell_line == "MCF7-GREB1-GFP") %>% rename(Real_GFP_intensity = Relative_MeanCytoInt)
+Exp_data_cytoplasmic_tff1 <- Exp_data %>% select(-c(Relative_MeanNucInt)) %>% 
+  filter(cell_line == "MCF7-TFF1-GFP") %>% rename(Real_GFP_intensity = Relative_MeanCytoInt)
+
+#create final dataset of EXP_data:
+Exp_data <- bind_rows(Exp_data_nucleic, Exp_data_cytoplasmic_greb1, Exp_data_cytoplasmic_tff1)
+
+#change the plateID to numbers:
+Exp_data <- Exp_data %>% mutate(plateID = ifelse(plateID == "20200619_Exp266_Nikon2_72hrslive","1", 
+                            ifelse(plateID == "20200626_Exp268_Nikon2_72hrslive","2", 
+                              ifelse(plateID == "20200703_Exp272_Nikon2_72hrslive","3", plateID)))) 
+Exp_data <- Exp_data %>% rename(StateVar = cell_line) %>% rename(replID = plateID)
+Exp_data <- Exp_data %>% mutate(dose_uM = as.numeric(as.character(dose_uM)), 
+                                StateVar = sapply(StateVar,function(statevar){str_split(statevar,"-")[[1]][2]},USE.NAMES = F))
+
+write.csv(Exp_data, file = "Exp_data.csv")
+```
