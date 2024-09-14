@@ -233,7 +233,7 @@ ggplot(BioRepMean %>% filter(dose_uM %in% c(0,0.01,0.1,1,10,100),
         strip.text = element_text(size = 12)) +
   facet_grid(cell_line ~ dose_uM, scales = "free_y", 
              labeller = labeller(.cols = facetlabels_cols, .rows = facetlabels_rows))
-ggsave("Figures/v2/FigS3D_GFPdata_unnormalised.pdf", width = 7, height = 4)
+ggsave("Figures/v2/FigS4D_GFPdata_unnormalised.pdf", width = 7, height = 4)
 ```
 
 *create the data set for experimental data as an input to the model in Jupyter notebook: "M21T_20220304_AK_E2Model.txt"*
