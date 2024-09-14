@@ -26,7 +26,7 @@ getwd()
 
 ### USER DEFINED VARIABLES ###
 
-DATE <- "20221216"
+DATE <- "20240322"
 
 PATH_TO_INPUT <- "/data/muriel/Projects/E2S/Analysis/00_Imaging/Exp007_FUCCI_Britt/Input/"
 OUTPUT_PATH <- "/data/muriel/Projects/E2S/Analysis/00_Imaging/Exp007_FUCCI_Britt/Output/"
@@ -50,6 +50,8 @@ p_load(DBI)
 p_load(tidyverse)
 p_load(ggnewscale)
 p_load(multidplyr)
+p_load(ggpubr)
+p_load(rstatix)
 
 # Functions
 getPCN <- function(x) {
@@ -68,34 +70,6 @@ if (!dir.exists(dirName)){
   dir.create(dirName)
   print("Created directory!")}
 
-# Make a cluster
-if(!exists("cluster")) {
-  cluster <- new_cluster(35)
-  cluster_library(cluster,"tidyverse")
-  cluster_send(cluster,
-               ma <- function(x, n = 5, side = 2){
-                 stats::filter(x, rep(1 / n, n), sides = side)
-               })
-  cluster_send(cluster,
-               getPCN <- function(x) {
-                 # Get the unique values and how often they are repeated
-                 y <- rle(x)
-                 # Bind the values in blocks of three with a dash in between
-                 sequences <- paste0(y$values,"-",c(y$values[-1],NA),"-",c(y$values[-1:-2],NA,NA))
-                 # Repeat every sequence of 3 according to the length of the chunk
-                 out <- rep(c(NA,sequences[-length(sequences)]),y$length)
-                 out
-               })
-  cluster_send(cluster,
-               getPrev <- function(x) {
-                 # Get the unique values and how often they are repeated
-                 y <- rle(x)
-                 # Bind the values in blocks of three with a dash in between
-                 prev <- y$values
-                 # Repeat every sequence of 3 according to the length of the chunk
-                 out <- rep(c(NA,prev[-length(prev)]),y$length)
-                 out
-               })}
 
 ### Start analysis
 
@@ -115,34 +89,12 @@ tracks_unique <- bind_rows(tracks_230, tracks_233)
 tracks_unique <- tracks_unique %>% 
   mutate(treatment = ifelse(treatment == "siKP", "siControl",treatment))
 
-# # Update PrevCurNext column
-# tracks_unique <- tracks_unique %>% ungroup() %>% 
-#   group_by(TrackNameUnique, well_name_p) %>%
-#   partition(cluster) %>% 
-#   mutate(PrevCurNext = getPCN(Phase_corrected)) %>%
-#   collect()
+
 
 # Rename phases
 tracks_unique <- tracks_unique %>% 
   mutate(Phase_corrected = ifelse(Phase_corrected == "G2", "S-G2-M", Phase_corrected))
 
-# # From the original tracks, delete duplicates but do not split mother and daughter cells
-# # Collapse duplicate rows into one
-# tracks_unique <- track_filtered_pks %>% ungroup() %>%
-#   filter(!duplicated(track_filtered_pks %>% ungroup() %>%
-#                        select(Experiment,well_name_p,cid,timeID,Cdt1,Geminin, meanHoechst, nucleiSize)))
-# # Remove tracks of length less than 5
-# tracks_unique <- tracks_unique %>%
-#   group_by(Experiment,well_name_p, cid, TrackID) %>%
-#   mutate(track_length = n()) %>%
-#   filter(track_length > 5) %>% ungroup()
-# # # Recalculate phase lengths
-# tracks_unique <- tracks_unique %>% group_by(Experiment,well_name_p, cid, TrackID) %>%
-#   mutate(PhaseLength = unlist(sapply(rle(Phase_corrected)$length,function(x){rep(x,x)}, simplify = T)))
-# # Change the time unit to hr^-1 instead of 0.5 hr^-1
-# tracks_unique <- tracks_unique %>% group_by(Experiment,well_name_p, cid, TrackID) %>%
-#   mutate(PhaseLength = TIME_STEP * PhaseLength)
-# #tracks_unique <- tracks_unique %>% filter(well_name_p == "C02_1")
 
 # # Filter only the full length phases
 tracks_unique <- tracks_unique %>% 
@@ -163,54 +115,52 @@ ggplot(phase_stats %>% filter(cell_line == "FUCCI",
                               treatment %in% c("mock", "siGREB1", "siPGR", "siTFF1"),
                               condition == "100nM"),
        aes(x = treatment, y = PhaseLength, fill = Phase_corrected)) + 
-  geom_point(shape = 21, size=1, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75), alpha = 0.25, color = "black") +
+  geom_point(shape = 21, size=1, position = position_jitterdodge(jitter.width = 0.3, dodge.width = 0.75), alpha = 0.25, color = "black") +
   geom_boxplot(alpha = 0.7, outlier.shape = NA) +
   ylab("Phase duration (h)") + xlab("Condition") +
   scale_fill_manual(values = c("G1" = "red","G1/S" = "gold", "S-G2-M" = "green"), 
                     name = "Phase") + 
   theme_classic() + 
-  theme(axis.text = element_text(size = 12),
+  theme(axis.text = element_text(size = 10),
         axis.title = element_text(size = 20),
         legend.title = element_text(size = 20),
-        legend.text = element_text(size = 12))
-ggsave(paste0(OUTPUT_PATH,READOUT,"_segmentation/",DATE,"_Figures/Fig5A_phase_length_stats_KDdata.pdf"), width = 8, height = 3)
+        legend.text = element_text(size = 12),
+        legend.position = "top") +
+  facet_grid(. ~ Phase_corrected)
+ggsave(paste0(OUTPUT_PATH,READOUT,"_segmentation/",DATE,"_Figures/Fig5A_phase_length_stats_KDdata.pdf"), width = 8.5, height = 3.5)
 
 
-# # Do statistical test
-# res.aov2 <- aov(PhaseLength ~ treatment + Phase_corrected, data = phase_stats %>% filter(cell_line == "FUCCI",
-#                                                                                          condition == "100nM"))
-# print(summary(res.aov2))
-# print(TukeyHSD(res.aov2, which = "treatment"))
-# 
-# res.aov3 <- aov(PhaseLength ~ treatment + Phase_corrected, data = phase_stats %>% filter(cell_line == "FUCCI",
-#                                                                                          condition == "100nM"))
-# print(summary(res.aov3))
-# print(TukeyHSD(res.aov3, which = "treatment"))
-# 
+# Check for normality ## VIOLATED!
+d <- phase_stats %>% filter(cell_line == "FUCCI",
+                            treatment %in% c("mock", "siGREB1", "siPGR", "siTFF1"),
+                            condition == "100nM") %>% mutate(phase_treatment = paste0(Phase_corrected,"_",treatment))
+# Build the linear model
+model  <- lm(PhaseLength ~ phase_treatment, data = d)
+# Create a QQ plot of residuals
+ggqqplot(residuals(model))
+# Compute Shapiro-Wilk test of normality
+shapiro_test(residuals(model))
 
-# Do pairwise t-test to check if phase lengths differ between treatment conditions
-# Do for G1
-#tmp <- phase_stats %>% filter(cell_line == "FUCCI")
-G1_data <- phase_stats %>% filter(cell_line == "FUCCI", 
-                                  Phase_corrected == "G1",
-                                  treatment %in% c("mock", "siGREB1", "siPGR", "siTFF1"),
-                                  condition == "100nM")
-print(pairwise.t.test(G1_data %>% pull (PhaseLength), G1_data %>% pull (treatment),
-                      p.adjust.method = "bonferroni"))
+# Check normality assumption by group
+d %>%
+  group_by(phase_treatment) %>%
+  shapiro_test(PhaseLength)
 
-# Do for G1/S
-G1S_data <- phase_stats %>% filter(cell_line == "FUCCI", 
-                                   Phase_corrected == "G1/S",
-                                   treatment %in% c("mock", "siGREB1", "siPGR", "siTFF1"),
-                                   condition == "100nM")
-print(pairwise.t.test(G1S_data %>% pull (PhaseLength), G1S_data %>% pull (treatment),
-                      p.adjust.method = "bonferroni"))
-
-# Do for G2
-G2_data <- phase_stats %>% filter(cell_line == "FUCCI", 
-                                  Phase_corrected == "S-G2-M",
-                                  treatment %in% c("mock", "siGREB1", "siPGR", "siTFF1"),
-                                  condition == "100nM")
-print(pairwise.t.test(G2_data %>% pull (PhaseLength), G2_data %>% pull (treatment),
-                      p.adjust.method = "bonferroni"))
+# Non-parametric test
+# Welch One way ANOVA test
+res.aov2 <- d %>% welch_anova_test(PhaseLength ~ phase_treatment)
+# Pairwise comparisons (Games-Howell)
+pwc2 <- d %>% games_howell_test(PhaseLength ~ phase_treatment)
+# Visualization: box plots with p-values
+pwc2 <- pwc2 %>% add_xy_position(x = "phase_treatment", step.increase = 1)
+# Filter out the relevant comparisons (within phases)
+pwc2 <- pwc2 %>% mutate(group1_cond = str_split(group1,"_", simplify = T)[,1],
+                        group2_cond = str_split(group2,"_", simplify = T)[,1]) %>%
+  filter(group1_cond == group2_cond)
+ggboxplot(d, x = "phase_treatment", y = "PhaseLength") +
+  stat_pvalue_manual(pwc2, hide.ns = TRUE) +
+  labs(
+    subtitle = get_test_label(res.aov2, detailed = TRUE),
+    caption = get_pwc_label(pwc2)
+  )
 

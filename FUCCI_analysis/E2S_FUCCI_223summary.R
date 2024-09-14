@@ -26,7 +26,7 @@ getwd()
 
 ### USER DEFINED VARIABLES ###
 
-DATE <- "20221216"
+DATE <- "20240322"
 
 PATH_TO_INPUT <- "/data/muriel/Projects/E2S/Analysis/00_Imaging/Exp007_FUCCI_Britt/Input/"
 OUTPUT_PATH <- "/data/muriel/Projects/E2S/Analysis/00_Imaging/Exp007_FUCCI_Britt/Output/"
@@ -50,6 +50,8 @@ p_load(DBI)
 p_load(tidyverse)
 p_load(ggnewscale)
 p_load(multidplyr)
+p_load(ggpubr)
+p_load(rstatix)
 
 # Functions
 getPCN <- function(x) {
@@ -68,34 +70,6 @@ if (!dir.exists(dirName)){
   dir.create(dirName)
   print("Created directory!")}
 
-# Make a cluster
-if(!exists("cluster")) {
-  cluster <- new_cluster(35)
-  cluster_library(cluster,"tidyverse")
-  cluster_send(cluster,
-               ma <- function(x, n = 5, side = 2){
-                 stats::filter(x, rep(1 / n, n), sides = side)
-               })
-  cluster_send(cluster,
-               getPCN <- function(x) {
-                 # Get the unique values and how often they are repeated
-                 y <- rle(x)
-                 # Bind the values in blocks of three with a dash in between
-                 sequences <- paste0(y$values,"-",c(y$values[-1],NA),"-",c(y$values[-1:-2],NA,NA))
-                 # Repeat every sequence of 3 according to the length of the chunk
-                 out <- rep(c(NA,sequences[-length(sequences)]),y$length)
-                 out
-               })
-  cluster_send(cluster,
-               getPrev <- function(x) {
-                 # Get the unique values and how often they are repeated
-                 y <- rle(x)
-                 # Bind the values in blocks of three with a dash in between
-                 prev <- y$values
-                 # Repeat every sequence of 3 according to the length of the chunk
-                 out <- rep(c(NA,prev[-length(prev)]),y$length)
-                 out
-               })}
 
 ### Start analysis
 
@@ -132,41 +106,53 @@ phase_stats <- tracks_unique %>% ungroup() %>%
 
 ggplot(phase_stats %>% filter(cell_line == "FUCCI"),
        aes(x = condition, y = PhaseLength, fill = Phase_corrected)) +
-  geom_point(shape = 21, size=1, position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.75), alpha = 0.25, color = "black") +
+  geom_point(shape = 21, size=1, position = position_jitterdodge(jitter.width = 0.3, dodge.width = 0.75), alpha = 0.25, color = "black") +
   geom_boxplot(alpha = 0.7, outlier.shape = NA) +
   ylab("Phase duration (h)") + xlab("E2 concentration") +
-  scale_fill_manual(values = c("G1" = "red","G1/S" = "gold", "S-G2-M" = "green"), 
-                    name = "Phase") + 
-  theme_classic() + 
-  theme(axis.text = element_text(size = 12),
+  scale_fill_manual(values = c("G1" = "red","G1/S" = "gold", "S-G2-M" = "green"),
+                    name = "Phase") +
+  theme_classic() +
+  theme(axis.text = element_text(size = 10),
         axis.title = element_text(size = 20),
         legend.title = element_text(size = 20),
-        legend.text = element_text(size = 12))
-ggsave(paste0(OUTPUT_PATH,READOUT,"_segmentation/",DATE,"_Figures/Fig4F_phase_length_stats_FUCCI223data.pdf"), width = 8, height = 3)
+        legend.text = element_text(size = 12),
+        legend.position = "top") +
+  facet_grid(. ~ Phase_corrected)
+ggsave(paste0(OUTPUT_PATH,READOUT,"_segmentation/",DATE,"_Figures/Fig4F_phase_length_stats_FUCCI223data.pdf"), width = 8.5, height = 3.5)
 
-# # Do statistical test
-# res.aov2 <- aov(PhaseLength ~ condition + Phase_corrected, data = phase_stats %>% filter(cell_line == "FUCCI"))
-# print(summary(res.aov2))
-# print(TukeyHSD(res.aov2, which = "condition"))
-# 
-# res.aov3 <- aov(PhaseLength ~ condition + Phase_corrected, data = phase_stats %>% filter(cell_line == "FUCCI"))
-# print(summary(res.aov3))
-# print(TukeyHSD(res.aov3, which = "condition"))
+dataStats <- phase_stats %>% filter(cell_line == "FUCCI",
+                       Phase_corrected == "G1") %>% group_by(condition) %>%
+  summarise(medianPhaseDur = median(PhaseLength))
 
+# Check for normality ## VIOLATED!
+d <- phase_stats %>% filter(cell_line == "FUCCI") %>% mutate(phase_condition = paste0(Phase_corrected,"_",condition))
+# Build the linear model
+model  <- lm(PhaseLength ~ phase_condition, data = d)
+# Create a QQ plot of residuals
+ggqqplot(residuals(model))
+# Compute Shapiro-Wilk test of normality
+shapiro_test(residuals(model))
 
-# Do pairwise t-test to check if phase lengths differ between conditions
-# Do for G1
-G1_data <- phase_stats %>% filter(cell_line == "FUCCI", Phase_corrected == "G1")
-print(pairwise.t.test(G1_data %>% pull (PhaseLength), G1_data %>% pull (condition),
-                      p.adjust.method = "bonferroni"))
+# Check normality assumption by group
+d %>%
+  group_by(phase_condition) %>%
+  shapiro_test(PhaseLength)
 
-# Do for G1/S
-G1S_data <- phase_stats %>% filter(cell_line == "FUCCI", Phase_corrected == "G1/S")
-print(pairwise.t.test(G1S_data %>% pull (PhaseLength), G1S_data %>% pull (condition),
-                      p.adjust.method = "bonferroni"))
-
-# Do for G2
-G2_data <- phase_stats %>% filter(cell_line == "FUCCI", Phase_corrected == "S-G2-M")
-print(pairwise.t.test(G2_data %>% pull (PhaseLength), G2_data %>% pull (condition),
-                      p.adjust.method = "bonferroni"))
+# Non-parametric test
+# Welch One way ANOVA test
+res.aov2 <- d %>% welch_anova_test(PhaseLength ~ phase_condition)
+# Pairwise comparisons (Games-Howell)
+pwc2 <- d %>% games_howell_test(PhaseLength ~ phase_condition)
+# Visualization: box plots with p-values
+pwc2 <- pwc2 %>% add_xy_position(x = "phase_condition", step.increase = 1)
+# Filter out the relevant comparisons (within phases)
+pwc2 <- pwc2 %>% mutate(group1_cond = str_split(group1,"_", simplify = T)[,1],
+                        group2_cond = str_split(group2,"_", simplify = T)[,1]) %>%
+  filter(group1_cond == group2_cond)
+ggboxplot(d, x = "phase_condition", y = "PhaseLength") +
+  stat_pvalue_manual(pwc2, hide.ns = TRUE) +
+  labs(
+    subtitle = get_test_label(res.aov2, detailed = TRUE),
+    caption = get_pwc_label(pwc2)
+  )
 
